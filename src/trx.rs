@@ -5,33 +5,28 @@ use std::time::SystemTime;
 
 pub struct LogLine {
     trace_id: String,
-    level: String, // error, warn, info, debug, trace
-    line: String,
     received_at: u128,
+    line: String,
+    json_line: Value,
 }
 
 struct LogLineParser {
     trace_id_field: String,
-    level_field: String,
 }
 
 impl LogLineParser {
     fn parse(&self, line: &str) -> Result<LogLine, &'static str> {
-        let json = serde_json::from_str::<Value>(line).map_err(|_| "Invalid JSON")?;
-        let trace_id = json
+        let json_line = serde_json::from_str::<Value>(line).map_err(|_| "Invalid JSON line")?;
+        let trace_id = json_line
             .get(&self.trace_id_field)
             .and_then(|v| v.as_str())
-            .ok_or("TraceId field not found")?;
-        let level = json
-            .get(&self.level_field)
-            .and_then(|v| v.as_str())
-            .ok_or("Level field not found")?;
+            .ok_or("Trace ID cannot be extracted")?;
         let received_at = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
         Ok(LogLine {
             trace_id: trace_id.to_string(),
-            level: level.to_string(),
             line: line.to_string(),
             received_at,
+            json_line,
         })
     }
 }
@@ -62,7 +57,10 @@ impl Transaction {
 
 fn triggers(line: &LogLine) -> bool {
     // Make configurable, later
-    line.level.to_ascii_lowercase() == "error"
+    line.json_line.get("level")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_ascii_lowercase() == "error")
+        .unwrap_or(false)
 }
 
 fn ends(_: &Transaction, _: &LogLine) -> bool {
@@ -73,12 +71,8 @@ fn ends(_: &Transaction, _: &LogLine) -> bool {
 pub enum Message {
     Line(String),
     Cleanup(u128),
+    Shutdown,
 }
-
-
-// fn get_trx(mut store: TrxStore, line: &LogLine) -> &mut Transaction {
-//     store.entry(line.trace_id.clone()).or_insert_with(|| Transaction::new(&line))
-// }
 
 struct TrxStore {
     buffers: HashMap<String, Transaction>,
@@ -114,7 +108,7 @@ pub struct TrxHandler {
 }
 
 impl TrxHandler {
-    pub fn new(trace_id_field: &str, level_field: &str, transaction_timeout: u128) -> Self {
+    pub fn new(trace_id_field: &str, transaction_timeout: u128) -> Self {
         Self {
             store: TrxStore {
                 buffers: HashMap::new(),
@@ -122,7 +116,6 @@ impl TrxHandler {
             },
             line_parser: LogLineParser {
                 trace_id_field: trace_id_field.to_string(),
-                level_field: level_field.to_string(),
             },
         }
     }
@@ -136,7 +129,6 @@ impl TrxHandler {
         }
         let trace_id = log_line.trace_id.clone();
         let does_end = ends(&trx, &log_line);
-        eprintln!("Log level: {}, triggers: {}", log_line.level, triggers(&log_line));
         if triggers(&log_line) {
             trx.triggered = true;
             // And flush the buffer
@@ -165,9 +157,9 @@ impl TrxHandler {
                 Ok(Message::Cleanup(now)) => {
                     self.store.cleanup(now);
                 },
-                Err(_) => {
-                    // No more senders, exit
-                }
+                Ok(Message::Shutdown) | Err(_) => {
+                    break;
+                },
             }
         }
     }

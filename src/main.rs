@@ -3,13 +3,9 @@ mod trx;
 use trx::*;
 
 use clap::Parser;
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::io::{self, BufRead, BufReader, IsTerminal};
 use std::process::{Command, Stdio};
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering::Relaxed;
 use std::sync::mpsc::{channel, Sender};
-use std::sync::Arc;
-use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime};
 
 #[derive(Parser)]
@@ -18,6 +14,9 @@ struct Cli {
     cmd: Option<String>,
     /// Arguments for the subprocess
     args: Vec<String>,
+    /// Trace ID JSON field
+    #[clap(long, default_value = "trace_id")]
+    id_field: String,
 }
 
 fn handle_target_app(ch: Sender<Message>, cmd: &str, args: Vec<String>) {
@@ -31,90 +30,60 @@ fn handle_target_app(ch: Sender<Message>, cmd: &str, args: Vec<String>) {
     // The target app will receive the same SIGINT/SIGTERM as we are, because of the same process
     // group. So no need to kill it explicitly, just read the output stream until EOF.
 
-    for line in io::BufReader::new(stdout).lines() {
-        if let Ok(line) = line {
-            ch.send(Message::Line(line)).expect("Cannot process a line");
-        }
-    }
+    handle_lines(ch, BufReader::new(stdout));
 }
 
-fn handle_stdin(state: &AppState, ch: Sender<Message>) {
-    let pipe_mode = !state.is_terminal;
-    for line in io::stdin().lock().lines() {
-        if !pipe_mode && state.shutting_down.load(Relaxed) {
-            break;
-        }
-        if let Ok(line) = line {
-            eprintln!("Received: {}", line);
-            ch.send(Message::Line(line)).expect("Cannot process a line");
-        }
-    }
-}
-
-fn spawn_cleanup_thread(state: &AppState, ch: Sender<Message>, interval: Duration) -> JoinHandle<()> {
-    let state = state.clone();
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(interval);
-            if state.shutting_down.load(Relaxed) {
+fn handle_lines<R: BufRead>(ch: Sender<Message>, lines: R) {
+    for line in lines.lines() {
+        match line {
+            Ok(line) => {
+                ch.send(Message::Line(line)).expect("Cannot process a line");
+            }
+            Err(e) => {
+                eprintln!("Error reading from the target app: {}", e);
                 break;
             }
-            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
-            ch.send(Message::Cleanup(now)).unwrap();
         }
-    })
-}
-
-#[derive(Clone)]
-struct AppState {
-    shutting_down: Arc<AtomicBool>,
-    is_terminal: bool,
-}
-
-impl AppState {
-    fn new() -> Self {
-        let app_state = Self {
-            shutting_down: Arc::new(AtomicBool::new(false)),
-            is_terminal: io::stdin().is_terminal(),
-        };
-
-        if app_state.is_terminal {
-            let shutting_down = app_state.shutting_down.clone();
-            ctrlc::set_handler(move || {
-                print!("Shutting down, press Enter to exit");
-                io::stdout().flush().unwrap();
-                shutting_down.store(true, Relaxed);
-            }).expect("Error setting Ctrl-C handler");
-        }
-
-        app_state
     }
+    ch.send(Message::Shutdown).expect("Error shutting down");
 }
 
 fn main() {
     let args = Cli::parse();
 
-    let trace_id_field = "trace_id";
-    let level_field = "level";
     let transaction_timeout = 5000; // Milliseconds
     let cleanup_interval = Duration::from_secs(1);
 
+    let stdin = io::stdin();
+    let is_terminal = stdin.is_terminal();
     let (sender, receiver) = channel();
 
-    let app_state = AppState::new();
+    let mut line_handler = TrxHandler::new(&args.id_field, transaction_timeout);
 
-    let mut line_handler = TrxHandler::new(trace_id_field, level_field, transaction_timeout);
-
-    let handler_thread = std::thread::spawn(move || {
-        line_handler.observe(receiver)
-    });
-    let cleanup_thread = spawn_cleanup_thread(&app_state, sender.clone(), cleanup_interval);
-
-    if let Some(cmd) = args.cmd {
-        handle_target_app(sender, &cmd, args.args)
-    } else {
-        handle_stdin(&app_state, sender)
+    {
+        let sender = sender.clone();
+        if let Some(cmd) = args.cmd {
+            std::thread::spawn(move || handle_target_app(sender, &cmd, args.args));
+        } else {
+            std::thread::spawn(move || handle_lines(sender, stdin.lock()));
+        }
+    }
+    {
+        let sender = sender.clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(cleanup_interval);
+                let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
+                sender.send(Message::Cleanup(now)).unwrap();
+            }
+        });
     }
 
-    handler_thread.join().unwrap();
+    if is_terminal {
+        ctrlc::set_handler(move || {
+            sender.send(Message::Shutdown).expect("Error shutting down");
+        }).expect("Error setting Ctrl-C handler");
+    }
+
+    line_handler.observe(receiver)
 }

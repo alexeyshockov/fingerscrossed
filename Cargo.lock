@@ -133,7 +133,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fingers-crossed-wrapper"
+name = "fingerscrossed"
 version = "0.1.0"
 dependencies = [
  "anyhow",
