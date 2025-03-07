@@ -1,0 +1,10 @@
+id_field = "trace_id"
+cleanup_interval = 1_000 # ms
+timeout = 5_000 # ms, since the last log line of the transaction
+flush_triggers = [
+    { level = ["error", "fatal", "critical"] },
+]
+completion_triggers = [
+    # 127.0.0.1:52605 - "GET /favicon.ico HTTP/1.1" 404
+    { logger = "uvicorn.access", message = { regex = '"(GET|POST|HEAD) /.* HTTP/.*" \d+' } },
+]

@@ -1,3 +1,4 @@
+use crate::config::{TrxConfig};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
@@ -11,14 +12,14 @@ pub struct LogLine {
 }
 
 struct LogLineParser {
-    trace_id_field: String,
+    trx_id_field: String,
 }
 
 impl LogLineParser {
     fn parse(&self, line: &str) -> Result<LogLine, &'static str> {
         let json_line = serde_json::from_str::<Value>(line).map_err(|_| "Invalid JSON line")?;
         let trace_id = json_line
-            .get(&self.trace_id_field)
+            .get(&self.trx_id_field)
             .and_then(|v| v.as_str())
             .ok_or("Trace ID cannot be extracted")?;
         let received_at = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
@@ -55,19 +56,6 @@ impl Transaction {
     }
 }
 
-fn triggers(line: &LogLine) -> bool {
-    // Make configurable, later
-    line.json_line.get("level")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_ascii_lowercase() == "error")
-        .unwrap_or(false)
-}
-
-fn ends(_: &Transaction, _: &LogLine) -> bool {
-    // TODO Make configurable
-    false
-}
-
 pub enum Message {
     Line(String),
     Cleanup(u128),
@@ -76,7 +64,7 @@ pub enum Message {
 
 struct TrxStore {
     buffers: HashMap<String, Transaction>,
-    transaction_timeout: u128,
+    trx_timeout: u128, // TODO Move to Transaction
 }
 
 impl TrxStore {
@@ -92,7 +80,7 @@ impl TrxStore {
     fn cleanup(&mut self, now: u128) {
         let mut to_remove = Vec::new();
         for (trace_id, transaction) in &self.buffers {
-            if transaction.age(now) > self.transaction_timeout {
+            if transaction.age(now) > self.trx_timeout {
                 to_remove.push(trace_id.clone());
             }
         }
@@ -105,18 +93,20 @@ impl TrxStore {
 pub struct TrxHandler {
     store: TrxStore,
     line_parser: LogLineParser,
+    conf: TrxConfig,
 }
 
 impl TrxHandler {
-    pub fn new(trace_id_field: &str, transaction_timeout: u128) -> Self {
+    pub fn new(conf: TrxConfig) -> Self {
         Self {
             store: TrxStore {
                 buffers: HashMap::new(),
-                transaction_timeout,
+                trx_timeout: conf.timeout as u128,
             },
             line_parser: LogLineParser {
-                trace_id_field: trace_id_field.to_string(),
+                trx_id_field: conf.id_field.clone(),
             },
+            conf,
         }
     }
 
@@ -128,8 +118,8 @@ impl TrxHandler {
             return Ok(());
         }
         let trace_id = log_line.trace_id.clone();
-        let does_end = ends(&trx, &log_line);
-        if triggers(&log_line) {
+        let (triggers_flush, completes_trx) = self.conf.matches(&log_line.json_line);
+        if triggers_flush {
             trx.triggered = true;
             // And flush the buffer
             for trx_line in &trx.log_lines {
@@ -140,7 +130,7 @@ impl TrxHandler {
         } else {
             trx.add(log_line);
         }
-        if does_end {
+        if completes_trx {
             self.store.remove(&trace_id);
         }
         Ok(())

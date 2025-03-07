@@ -1,0 +1,11 @@
+{"trace_id": "RvcqwoZ7k9", "level": "debug", "message": "Internal details"}
+{"trace_id": "RvcqwoZ7k9", "level": "info", "message": "Operational details"}
+{"trace_id": "RvcqwoZ7k9", "level": "error", "message": "Error!"}
+{"trace_id": "v3Xgbnzg7t", "level": "debug", "message": "Internal details"}
+{"trace_id": "v3Xgbnzg7t", "level": "info", "message": "Operational details"}
+{"trace_id": "coPQfYg23a", "level": "debug", "message": "Internal details"}
+{"trace_id": "coPQfYg23a", "level": "info", "message": "Operational details"}
+{"trace_id": "Dn8wbQczwG", "level": "debug", "message": "Internal details"}
+{"trace_id": "Dn8wbQczwG", "level": "info", "message": "Operational details 1"}
+{"trace_id": "Dn8wbQczwG", "level": "info", "message": "Operational details 2"}
+{"trace_id": "Dn8wbQczwG", "level": "error", "message": "Error again!"}

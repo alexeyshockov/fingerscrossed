@@ -1,12 +1,19 @@
 mod trx;
+mod config;
 
+use config::*;
 use trx::*;
 
+use anyhow::Result;
 use clap::Parser;
+use std::fs;
 use std::io::{self, BufRead, BufReader, IsTerminal};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{channel, Sender};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser)]
 struct Cli {
@@ -14,9 +21,15 @@ struct Cli {
     cmd: Option<String>,
     /// Arguments for the subprocess
     args: Vec<String>,
-    /// Trace ID JSON field
-    #[clap(long, default_value = "trace_id")]
-    id_field: String,
+    /// Path to the configuration file
+    #[clap(long, short, default_value = ".fingerscrossed.toml")]
+    config: PathBuf,
+    /// Enable verbose output
+    #[clap(long, short)]
+    verbose: bool,
+    /// Print version information
+    #[clap(long)]
+    version: bool,
 }
 
 fn handle_target_app(ch: Sender<Message>, cmd: &str, args: Vec<String>) {
@@ -51,14 +64,48 @@ fn handle_lines<R: BufRead>(ch: Sender<Message>, lines: R) {
 fn main() {
     let args = Cli::parse();
 
-    let transaction_timeout = 5000; // Milliseconds
-    let cleanup_interval = Duration::from_secs(1);
+    if args.version {
+        println!("fingerscrossed {}", VERSION);
+        return;
+    }
+
+    if args.verbose {
+        eprintln!("fingerscrossed {}", VERSION);
+    }
+
+    fn read_config(path: &PathBuf) -> Result<(PathBuf, Config)> {
+        let config_file = if path.is_dir() {
+            path.join(".fingerscrossed.toml")
+        } else {
+            path.clone()
+        };
+        let config_content = fs::read_to_string(config_file.clone())?;
+        let config = toml::from_str(&config_content)?;
+        Ok((config_file, config))
+    }
+
+    let trx_config = match read_config(&args.config) {
+        Ok((file, config)) => {
+            if args.verbose {
+                eprintln!("Using configuration from {}", file.display());
+            }
+            TrxConfig::from(config)
+        }
+        Err(e) => {
+            if args.verbose {
+                eprintln!("Failed to read config file: {}", e);
+                eprintln!("Using default configuration");
+            }
+            TrxConfig::default()
+        }
+    };
 
     let stdin = io::stdin();
     let is_terminal = stdin.is_terminal();
+    let cleanup_interval = trx_config.cleanup_interval;
     let (sender, receiver) = channel();
 
-    let mut line_handler = TrxHandler::new(&args.id_field, transaction_timeout);
+    let mut line_handler = TrxHandler::new(trx_config);
 
     {
         let sender = sender.clone();
