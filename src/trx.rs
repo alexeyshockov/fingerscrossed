@@ -78,7 +78,7 @@ impl TrxStore {
     }
 
     fn cleanup(&mut self, now: u128) {
-        let mut to_remove = Vec::new();
+        let mut to_remove = Vec::with_capacity(self.buffers.len());
         for (trace_id, transaction) in &self.buffers {
             if transaction.age(now) > self.trx_timeout {
                 to_remove.push(trace_id.clone());
