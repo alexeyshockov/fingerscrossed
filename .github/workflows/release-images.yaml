@@ -49,10 +49,13 @@ jobs:
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
+        env:
+          RUST_OS: ${{ matrix.platform.rust_os }}
+          APP_OS: ${{ matrix.platform.app_os }}
         with:
           build-args: |
-            RUST_OS="${{ matrix.platform.rust_os }}"
-            APP_OS="${{ matrix.platform.app_os }}"
+            RUST_OS
+            APP_OS
           tags: ${{ env.REGISTRY_IMAGE }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
