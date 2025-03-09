@@ -98,8 +98,6 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests

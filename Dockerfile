@@ -6,7 +6,7 @@ ARG RUST_OS=bookworm
 ARG APP_OS=debian:bookworm-slim
 
 
-FROM rust:${RUST_VERSION}-${RUST_OS} as builder
+FROM rust:${RUST_VERSION}-${RUST_OS} AS builder
 WORKDIR /usr/src/fingerscrossed
 COPY . .
 RUN cargo build --locked --release
