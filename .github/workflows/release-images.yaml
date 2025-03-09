@@ -2,8 +2,9 @@ name: Release images
 
 on:
   workflow_dispatch:
-  release:
-    types: [ published ]
+  push:
+    tags:
+      - v*
 
 env:
   REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
@@ -50,8 +51,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           build-args: |
-            RUS_OS="${{ matrix.docker.rust_os }}"
-            APP_OS="${{ matrix.docker.app_os }}"
+            RUST_OS="${{ matrix.platform.rust_os }}"
+            APP_OS="${{ matrix.platform.app_os }}"
           tags: ${{ env.REGISTRY_IMAGE }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
