@@ -9,7 +9,11 @@ ARG APP_OS=debian:bookworm-slim
 FROM rust:${RUST_VERSION}-${RUST_OS} AS builder
 WORKDIR /usr/src/fingerscrossed
 COPY . .
-RUN cargo build --locked --release
+RUN set -o errexit -o nounset -o allexport && \
+    if [ "${RUST_OS}" = "alpine" ]; then \
+        apk add --no-cache musl-dev; \
+    fi && \
+    cargo build --locked --release
 
 
 FROM ${APP_OS}
