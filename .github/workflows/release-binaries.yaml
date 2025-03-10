@@ -1,0 +1,44 @@
+name: Release binaries
+
+on:
+  workflow_dispatch:
+  release:
+    types: [ published ]
+
+jobs:
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - target: x86_64-unknown-linux-gnu
+            bin: fingerscrossed-x86_64
+            builder: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            bin: fingerscrossed-arm64
+            builder: ubuntu-24.04-arm
+          - target: x86_64-unknown-linux-musl
+            bin: fingerscrossed-x86_64-musl
+            builder: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            bin: fingerscrossed-arm64-musl
+            builder: ubuntu-24.04-arm
+    runs-on: ${{ matrix.platform.builder }}
+    name: ${{ matrix.platform.bin }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.platform.target }}
+      - name: Build
+        run: cargo build --locked --release --target ${{ matrix.platform.target }}
+      - name: Rename files
+        run: mv target/${{ matrix.platform.target }}/release/fingerscrossed target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+      - name: checksum
+        run: shasum -a 256 target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }} | cut -d ' ' -f 1 > target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}.sha256
+      - name: Attach to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}
+            target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}.sha256
