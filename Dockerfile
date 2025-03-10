@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1.11
+
 ARG RUST_VERSION=1.85
 # "bookworm" (or other Debian version) or "alpine"
 ARG RUST_OS=bookworm

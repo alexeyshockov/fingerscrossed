@@ -1,9 +1,11 @@
-use crate::config::{TrxConfig};
+use crate::config::TrxConfig;
+use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
 use std::time::SystemTime;
 
+#[derive(Debug, Clone)]
 pub struct LogLine {
     trace_id: String,
     received_at: u128,
@@ -11,18 +13,19 @@ pub struct LogLine {
     json_line: Value,
 }
 
+#[derive(Debug)]
 struct LogLineParser {
     trx_id_field: String,
 }
 
 impl LogLineParser {
-    fn parse(&self, line: &str) -> Result<LogLine, &'static str> {
-        let json_line = serde_json::from_str::<Value>(line).map_err(|_| "Invalid JSON line")?;
+    fn parse(&self, line: &str) -> Result<LogLine> {
+        let json_line = serde_json::from_str::<Value>(line)?;
         let trace_id = json_line
             .get(&self.trx_id_field)
             .and_then(|v| v.as_str())
-            .ok_or("Trace ID cannot be extracted")?;
-        let received_at = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
+            .ok_or(anyhow!("Trace ID cannot be extracted"))?;
+        let received_at = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_millis();
         Ok(LogLine {
             trace_id: trace_id.to_string(),
             line: line.to_string(),
@@ -32,16 +35,15 @@ impl LogLineParser {
     }
 }
 
+#[derive(Debug)]
 struct Transaction {
-    trace_id: String,
     triggered: bool,
     log_lines: Vec<LogLine>,
 }
 
 impl Transaction {
-    fn new(trace_id: String) -> Self {
+    fn new() -> Self {
         Self {
-            trace_id,
             triggered: false,
             log_lines: Vec::with_capacity(10),
         }
@@ -56,21 +58,25 @@ impl Transaction {
     }
 }
 
+#[derive(Debug)]
 pub enum Message {
+    /// A new log line to process
     Line(String),
+    /// Time to clean up expired transactions
     Cleanup(u128),
+    /// Stop the processing loop
     Shutdown,
 }
 
 struct TrxStore {
     buffers: HashMap<String, Transaction>,
-    trx_timeout: u128, // TODO Move to Transaction
+    trx_timeout: u128,
 }
 
 impl TrxStore {
     fn get(&mut self, line: &LogLine) -> &mut Transaction {
         let tid = &line.trace_id;
-        self.buffers.entry(tid.clone()).or_insert_with(|| Transaction::new(tid.clone()))
+        self.buffers.entry(tid.clone()).or_insert_with(Transaction::new)
     }
 
     fn remove(&mut self, trace_id: &str) {
@@ -110,7 +116,7 @@ impl TrxHandler {
         }
     }
 
-    fn handle_trx_line(&mut self, line: &str) -> Result<(), &'static str> {
+    fn handle_trx_line(&mut self, line: &str) -> Result<()> {
         let log_line = self.line_parser.parse(line)?;
         let trx = self.store.get(&log_line);
         if trx.triggered {
@@ -152,5 +158,46 @@ impl TrxHandler {
                 },
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_log_line_parser() {
+        let parser = LogLineParser {
+            trx_id_field: "trace_id".to_string(),
+        };
+
+        let line = r#"{"trace_id": "123", "message": "test"}"#;
+        let result = parser.parse(line);
+        assert!(result.is_ok());
+
+        let log_line = result.unwrap();
+        assert_eq!(log_line.trace_id, "123");
+    }
+
+    #[test]
+    fn test_transaction_age() {
+        let transaction = Transaction::new();
+        let now = 1000;
+        assert_eq!(transaction.age(now), 0);
+    }
+
+    #[test]
+    fn test_transaction_add_line() {
+        let line = serde_json::json!({"trace_id": "123", "message": "test"});
+        let mut transaction = Transaction::new();
+        let log_line = LogLine {
+            trace_id: "123".to_string(),
+            received_at: 1000,
+            line: line.to_string(),
+            json_line: line,
+        };
+        transaction.add(log_line.clone());
+        assert_eq!(transaction.log_lines.len(), 1);
+        assert_eq!(transaction.log_lines[0].trace_id, "123");
     }
 }

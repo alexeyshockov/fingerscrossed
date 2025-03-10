@@ -1,7 +1,8 @@
+use regex::RegexBuilder;
 use serde::Deserialize;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
-use serde_json::Value;
 
 pub struct TrxConfig {
     pub id_field: String,
@@ -99,7 +100,7 @@ impl FieldMatcher {
                 value.as_i64().map_or(false, |v| expected.iter().any(|e| e == &v))
             }
             FieldMatcher::Regex { regex } => {
-                let re = regex::RegexBuilder::new(regex).case_insensitive(true).build().unwrap();
+                let re = RegexBuilder::new(regex).case_insensitive(true).build().unwrap();
                 value.as_str().map_or(false, |v| re.is_match(v))
             }
         }
