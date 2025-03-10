@@ -7,6 +7,7 @@ ARG APP_OS=debian:bookworm-slim
 
 
 FROM rust:${RUST_VERSION}-${RUST_OS} AS builder
+ARG RUST_OS
 WORKDIR /usr/src/fingerscrossed
 COPY . .
 RUN set -o errexit -o nounset -o allexport && \
